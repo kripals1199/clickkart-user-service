@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,6 +42,7 @@ class UserProfileServiceImplTest {
     private static final RequestMetadata METADATA = new RequestMetadata("203.0.113.7", "junit");
 
     @Mock private UserProfileRepository userProfileRepository;
+    @Mock private UserProfileCreator userProfileCreator;
     @Mock private AuditTrailService auditTrailService;
 
     private UserProfileServiceImpl service;
@@ -50,16 +52,25 @@ class UserProfileServiceImplTest {
         UserProperties properties = new UserProperties();
         properties.setDefaultLanguage("en");
         properties.setDefaultCurrency("INR");
-        service = new UserProfileServiceImpl(userProfileRepository, auditTrailService, properties);
-        when(userProfileRepository.saveAndFlush(any(UserProfileEntity.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        service = new UserProfileServiceImpl(
+                userProfileRepository, userProfileCreator, auditTrailService, properties);
+    }
+
+    /** Mirrors the real flow: the creator commits the row, so the following read finds it. */
+    private void creatorInsertsSuccessfully(String userPublicId) {
+        UserProfileEntity created = UserProfileEntity.createFor(userPublicId, "en", "INR");
+        when(userProfileRepository.findByUserPublicId(userPublicId))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(created));
     }
 
     @Test
     void anEmptyProfileIsCreatedOnFirstAccessWithConfiguredDefaults() {
-        when(userProfileRepository.findByUserPublicId(USER_ID)).thenReturn(Optional.empty());
+        creatorInsertsSuccessfully(USER_ID);
 
         UserProfileResponse profile = service.getOwnProfile(USER_ID, CORRELATION_ID, METADATA);
+
+        verify(userProfileCreator).createInNewTransaction(USER_ID, "en", "INR");
 
         assertThat(profile.userPublicId()).isEqualTo(USER_ID);
         assertThat(profile.preferredLanguage()).isEqualTo("en");
@@ -79,7 +90,7 @@ class UserProfileServiceImplTest {
 
         service.getOwnProfile(USER_ID, CORRELATION_ID, METADATA);
 
-        verify(userProfileRepository, never()).saveAndFlush(any());
+        verify(userProfileCreator, never()).createInNewTransaction(any(), any(), any());
         verify(auditTrailService, never())
                 .record(any(), any(), eq(UserAuditAction.PROFILE_CREATED), any(), any());
     }
@@ -87,13 +98,14 @@ class UserProfileServiceImplTest {
     @Test
     void losingTheFirstAccessRaceReturnsTheWinnersProfileRatherThanFailing() {
         // Two concurrent first-time requests both see no row and both insert; the unique constraint
-        // rejects the loser. Re-reading turns that into a normal read instead of a 500.
+        // rejects the loser. The loser must end up with the winner's row, not a 500.
         UserProfileEntity winner = UserProfileEntity.createFor(USER_ID, "en", "INR");
         when(userProfileRepository.findByUserPublicId(USER_ID))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.of(winner));
-        when(userProfileRepository.saveAndFlush(any(UserProfileEntity.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate key user_public_id"));
+        doThrow(new DataIntegrityViolationException("duplicate key user_public_id"))
+                .when(userProfileCreator)
+                .createInNewTransaction(eq(USER_ID), any(), any());
 
         UserProfileEntity resolved = service.getOrCreateProfile(USER_ID, CORRELATION_ID, METADATA);
 
@@ -104,13 +116,12 @@ class UserProfileServiceImplTest {
     }
 
     @Test
-    void aDuplicateKeyThatSomehowResolvesToNoRowStillSurfacesTheOriginalFailure() {
+    void aRowThatIsNeitherFoundNorCreatedFailsLoudlyRatherThanReturningNull() {
         when(userProfileRepository.findByUserPublicId(USER_ID)).thenReturn(Optional.empty());
-        when(userProfileRepository.saveAndFlush(any(UserProfileEntity.class)))
-                .thenThrow(new DataIntegrityViolationException("some other constraint"));
 
         assertThatThrownBy(() -> service.getOrCreateProfile(USER_ID, CORRELATION_ID, METADATA))
-                .isInstanceOf(DataIntegrityViolationException.class);
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(USER_ID);
     }
 
     @Test

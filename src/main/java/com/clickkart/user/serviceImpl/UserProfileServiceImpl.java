@@ -16,6 +16,7 @@ import com.clickkart.user.service.UserProfileService;
 import com.clickkart.user.web.RequestMetadata;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserProfileServiceImpl implements UserProfileService {
 
     private final UserProfileRepository userProfileRepository;
+    private final UserProfileCreator userProfileCreator;
     private final AuditTrailService auditTrailService;
     private final UserProperties userProperties;
 
@@ -38,36 +40,53 @@ public class UserProfileServiceImpl implements UserProfileService {
      * {@inheritDoc}
      *
      * <p>The insert can lose a race: two concurrent first-time requests from the same customer (a
-     * page that fires several calls at once is enough) both see no row and both insert. The unique
-     * constraint on {@code user_public_id} is what actually prevents a duplicate profile; catching
-     * the violation and re-reading turns the loser of that race into a normal read rather than a
-     * 500. Relying on "check then insert" alone would be a correctness bug that only appears under
-     * concurrency.
+     * page firing several calls at once is enough) both see no row and both insert. The unique
+     * constraint on {@code user_public_id} is what actually prevents a duplicate profile - "check
+     * then insert" alone is a correctness bug that only shows up under concurrency.
+     *
+     * <p>The insert therefore runs in its own transaction ({@link UserProfileCreator}). It cannot be
+     * done inline: a failed flush marks the surrounding transaction rollback-only, so catching the
+     * violation and re-reading in the same transaction would fail on the re-read and turn a routine
+     * race into a 500. Both paths finish by re-reading through this transaction's own persistence
+     * context, so the returned entity is managed here and the caller's subsequent mutations are
+     * picked up by dirty checking.
      */
     @Override
     @Transactional
     public UserProfileEntity getOrCreateProfile(
             String userPublicId, String correlationId, RequestMetadata requestMetadata) {
-        return userProfileRepository
-                .findByUserPublicId(userPublicId)
-                .orElseGet(() -> createProfile(userPublicId, correlationId, requestMetadata));
-    }
-
-    private UserProfileEntity createProfile(
-            String userPublicId, String correlationId, RequestMetadata requestMetadata) {
-        UserProfileEntity profile = UserProfileEntity.createFor(
-                userPublicId, userProperties.getDefaultLanguage(), userProperties.getDefaultCurrency());
-        try {
-            profile = userProfileRepository.saveAndFlush(profile);
-        } catch (DataIntegrityViolationException e) {
-            log.debug("PROFILE_CREATE_RACE_LOST userPublicId={} correlationId={} - re-reading the winner's row",
-                    userPublicId, correlationId);
-            return userProfileRepository
-                    .findByUserPublicId(userPublicId)
-                    .orElseThrow(() -> e);
+        Optional<UserProfileEntity> existing = userProfileRepository.findByUserPublicId(userPublicId);
+        if (existing.isPresent()) {
+            return existing.get();
         }
-        auditTrailService.record(
-                correlationId, userPublicId, UserAuditAction.PROFILE_CREATED, requestMetadata, "profile auto-provisioned on first access");
+
+        boolean createdByThisRequest = true;
+        try {
+            userProfileCreator.createInNewTransaction(
+                    userPublicId, userProperties.getDefaultLanguage(), userProperties.getDefaultCurrency());
+        } catch (DataIntegrityViolationException e) {
+            // Another request created it between our read and our insert. That is the constraint
+            // doing its job, not an error - fall through and read the winner's row.
+            log.debug("PROFILE_CREATE_RACE_LOST userPublicId={} correlationId={} - reading the winner's row",
+                    userPublicId, correlationId);
+            createdByThisRequest = false;
+        }
+
+        UserProfileEntity profile = userProfileRepository
+                .findByUserPublicId(userPublicId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Profile for " + userPublicId + " was neither found nor created"));
+
+        // Only the request that actually inserted the row reports it, so a lost race does not emit
+        // a second PROFILE_CREATED event for a profile that was only created once.
+        if (createdByThisRequest) {
+            auditTrailService.record(
+                    correlationId,
+                    userPublicId,
+                    UserAuditAction.PROFILE_CREATED,
+                    requestMetadata,
+                    "profile auto-provisioned on first access");
+        }
         return profile;
     }
 
