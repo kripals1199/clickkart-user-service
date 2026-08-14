@@ -124,6 +124,28 @@ public class SellerProfileEntity extends BaseEntity {
         this.pickupAddressId = null;
     }
 
+    /**
+     * Scrubs the business identity as part of an ADMIN-performed erasure.
+     *
+     * <p>The GSTIN cannot be replaced with a fixed marker: it carries a unique constraint, so a
+     * second erased seller would collide with the first and the erasure would fail with a
+     * constraint violation - at exactly the moment it must not. Substituting a per-row value keeps
+     * the column unique while leaving nothing recoverable.
+     *
+     * <p>Verification is set to REJECTED rather than left as VERIFIED, so nothing downstream reads
+     * an erased seller as one still cleared to trade.
+     */
+    public void eraseBusinessIdentity() {
+        this.businessName = "[erased]";
+        this.gstin = "ERASED-" + getId();
+        this.supportEmail = null;
+        this.supportPhone = null;
+        this.pickupAddressId = null;
+        this.verificationStatus = SellerVerificationStatus.REJECTED;
+        this.verificationNote = "Account erased at the data principal's request";
+        this.verificationDecidedAt = Instant.now();
+    }
+
     public boolean isOwnedBy(String userPublicId) {
         return profile != null && profile.getUserPublicId().equals(userPublicId);
     }

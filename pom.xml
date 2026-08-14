@@ -23,11 +23,12 @@
         <java.version>21</java.version>
         <spring-cloud.version>2025.1.2</spring-cloud.version>
         <!-- Enforced floor, deliberately set just below the measured coverage at the time of
-             writing (0.66, confirmed by bisecting the gate until it failed) rather than an
+             writing (0.69, confirmed by bisecting the gate until it failed) rather than an
              aspirational number the build never actually met. A gate that always fails gets
              bypassed and stops meaning anything; this one passes today, so any drop below it is a
-             real regression. Ratcheted from 0.60 when the seller profile, internal API and
-             bean-validation suites landed - it should only ever move upward.
+             real regression. Ratcheted 0.60 -> 0.65 when the seller profile, internal API and
+             bean-validation suites landed; measured has since risen to 0.69 with the erasure
+             suite, leaving headroom above the floor. It should only ever move upward.
              Enforced on every push by .github/workflows/ci.yml (mvn verify). -->
         <jacoco.line.ratio.minimum>0.65</jacoco.line.ratio.minimum>
     </properties>

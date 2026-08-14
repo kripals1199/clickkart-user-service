@@ -21,5 +21,11 @@ public enum UserAuditAction {
     /** Seller changed their business identity, so a previously granted verification was withdrawn. */
     SELLER_VERIFICATION_RESET,
     /** An operator approved or rejected a seller. Recorded against the ADMIN, not the seller. */
-    SELLER_VERIFICATION_DECIDED
+    SELLER_VERIFICATION_DECIDED,
+    /**
+     * Personal data erased on request. The entry itself is deliberately retained - it records that
+     * an erasure happened and when, which is the evidence a data-protection request was honoured,
+     * and it carries no personal data to erase.
+     */
+    PROFILE_ERASED
 }

@@ -43,6 +43,8 @@ class UserProfileServiceImplTest {
 
     @Mock private UserProfileRepository userProfileRepository;
     @Mock private UserProfileCreator userProfileCreator;
+    @Mock private com.clickkart.user.repository.AddressRepository addressRepository;
+    @Mock private com.clickkart.user.repository.SellerProfileRepository sellerProfileRepository;
     @Mock private AuditTrailService auditTrailService;
 
     private UserProfileServiceImpl service;
@@ -53,7 +55,8 @@ class UserProfileServiceImplTest {
         properties.setDefaultLanguage("en");
         properties.setDefaultCurrency("INR");
         service = new UserProfileServiceImpl(
-                userProfileRepository, userProfileCreator, auditTrailService, properties);
+                userProfileRepository, userProfileCreator, addressRepository, sellerProfileRepository,
+                auditTrailService, properties);
     }
 
     /** Mirrors the real flow: the creator commits the row, so the following read finds it. */

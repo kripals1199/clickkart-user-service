@@ -21,6 +21,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -68,6 +69,23 @@ public class UserProfileController {
         UserProfileResponse profile = userProfileService.updateOwnPreferences(
                 principal.userId(), request, principal.correlationId(), metadataOf(httpRequest));
         return envelope(HttpStatus.OK.value(), profile, httpRequest);
+    }
+
+    /**
+     * 204 No Content. Irreversible: profile fields cleared, marketing consent withdrawn, every
+     * saved address scrubbed and deleted. Subsequent reads still work and report {@code erasedAt};
+     * every write returns 409.
+     *
+     * <p>Refused with 409 while the account has a seller profile, since business records carry
+     * statutory retention obligations - the response says so rather than failing opaquely.
+     */
+    @Operation(summary = "Erase the authenticated customer's personal data (irreversible)")
+    @DeleteMapping(ApiPaths.ME)
+    public ResponseEntity<ApiResponse<Void>> eraseMyProfile(
+            @AuthenticationPrincipal AuthenticatedPrincipal principal, HttpServletRequest httpRequest) {
+        userProfileService.eraseOwnProfile(
+                principal.userId(), principal.correlationId(), metadataOf(httpRequest));
+        return envelope(HttpStatus.NO_CONTENT.value(), null, httpRequest);
     }
 
     private RequestMetadata metadataOf(HttpServletRequest request) {

@@ -59,7 +59,7 @@ class SellerProfileServiceImplTest {
         service = new SellerProfileServiceImpl(
                 sellerProfileRepository, addressRepository, userProfileService, auditTrailService);
         profile = UserProfileEntity.createFor(SELLER, "en", "INR");
-        when(userProfileService.getOrCreateProfile(eq(SELLER), any(), any())).thenReturn(profile);
+        when(userProfileService.getWritableProfile(eq(SELLER), any(), any())).thenReturn(profile);
         when(sellerProfileRepository.saveAndFlush(any(SellerProfileEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }

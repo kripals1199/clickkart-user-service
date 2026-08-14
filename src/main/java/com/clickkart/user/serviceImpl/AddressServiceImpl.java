@@ -83,7 +83,7 @@ public class AddressServiceImpl implements AddressService {
             throw new AddressLimitExceededException(userProperties.getMaxAddressesPerUser());
         }
 
-        UserProfileEntity profile = userProfileService.getOrCreateProfile(userPublicId, correlationId, requestMetadata);
+        UserProfileEntity profile = userProfileService.getWritableProfile(userPublicId, correlationId, requestMetadata);
         AddressEntity address = AddressEntity.createFor(profile);
         applyRequest(address, request);
         address = addressRepository.saveAndFlush(address);

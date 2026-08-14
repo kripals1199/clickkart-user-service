@@ -76,7 +76,7 @@ public class SellerProfileServiceImpl implements SellerProfileService {
             action = UserAuditAction.SELLER_PROFILE_UPDATED;
         } else {
             UserProfileEntity profile =
-                    userProfileService.getOrCreateProfile(userPublicId, correlationId, requestMetadata);
+                    userProfileService.getWritableProfile(userPublicId, correlationId, requestMetadata);
             seller = SellerProfileEntity.createFor(profile);
             seller.update(
                     request.businessName().trim(), gstin, trimToNull(request.supportEmail()),

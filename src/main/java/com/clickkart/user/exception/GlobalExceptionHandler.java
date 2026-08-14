@@ -67,6 +67,20 @@ public class GlobalExceptionHandler {
         return respond(HttpStatus.NOT_FOUND, ErrorCode.PROFILE_NOT_FOUND, ex.getMessage(), request);
     }
 
+    /** 409, not 404: the profile exists and is readable, it just cannot be written to any more. */
+    @ExceptionHandler(ProfileErasedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProfileErased(
+            ProfileErasedException ex, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, ErrorCode.PROFILE_ERASED, ex.getMessage(), request);
+    }
+
+    /** Carries the reason as display text so support can act on it without reading logs. */
+    @ExceptionHandler(ErasureBlockedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleErasureBlocked(
+            ErasureBlockedException ex, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, ErrorCode.ERASURE_BLOCKED, ex.getReason(), request);
+    }
+
     @ExceptionHandler(SellerProfileNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleSellerProfileNotFound(
             SellerProfileNotFoundException ex, HttpServletRequest request) {
@@ -171,6 +185,8 @@ public class GlobalExceptionHandler {
         static final String PROFILE_NOT_FOUND = "PROFILE_NOT_FOUND";
         static final String SELLER_PROFILE_NOT_FOUND = "SELLER_PROFILE_NOT_FOUND";
         static final String DUPLICATE_GSTIN = "DUPLICATE_GSTIN";
+        static final String PROFILE_ERASED = "PROFILE_ERASED";
+        static final String ERASURE_BLOCKED = "ERASURE_BLOCKED";
         static final String ADDRESS_LIMIT_EXCEEDED = "ADDRESS_LIMIT_EXCEEDED";
         static final String CONCURRENT_MODIFICATION = "CONCURRENT_MODIFICATION";
         static final String SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE";

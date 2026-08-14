@@ -58,7 +58,7 @@ class AddressServiceImplTest {
                 addressRepository, sellerProfileRepository, userProfileService, auditTrailService, userProperties);
 
         profile = UserProfileEntity.createFor(OWNER, "en", "INR");
-        when(userProfileService.getOrCreateProfile(eq(OWNER), any(), any())).thenReturn(profile);
+        when(userProfileService.getWritableProfile(eq(OWNER), any(), any())).thenReturn(profile);
         when(sellerProfileRepository.findByPickupAddressId(org.mockito.ArgumentMatchers.anyLong()))
                 .thenReturn(java.util.List.of());
         when(addressRepository.saveAndFlush(any(AddressEntity.class)))

@@ -40,6 +40,9 @@ import lombok.NoArgsConstructor;
         })
 public class AddressEntity extends BaseEntity {
 
+    /** Fits every scrubbed column's length limit, including {@code postal_code} at 10. */
+    private static final String REDACTED = "[erased]";
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "profile_id", nullable = false, updatable = false)
     private UserProfileEntity profile;
@@ -120,6 +123,33 @@ public class AddressEntity extends BaseEntity {
 
     /** Also clears the default flag - a deleted address must never remain the one orders default to. */
     public void markDeleted() {
+        this.deleted = true;
+        this.defaultAddress = false;
+    }
+
+    /**
+     * Irreversibly overwrites every field that identifies a person or a place, as part of profile
+     * erasure. The row itself survives for the same reason it survives an ordinary delete - it may
+     * be referenced - but nothing recoverable is left in it.
+     *
+     * <p>This is why Order Service must <em>snapshot</em> an address at checkout rather than hold a
+     * reference to this row: an order's own record of where it shipped is subject to statutory
+     * retention and must not be rewritten by a later erasure request, while this row must be. Two
+     * different obligations on the same data, which only separate copies can satisfy.
+     *
+     * <p>Non-null columns get a fixed marker rather than empty strings, so a redacted row is
+     * obviously redacted in a query result instead of looking like corrupt or partial data.
+     */
+    public void scrubForErasure() {
+        this.recipientName = REDACTED;
+        this.contactNumber = REDACTED;
+        this.line1 = REDACTED;
+        this.line2 = null;
+        this.landmark = null;
+        this.city = REDACTED;
+        this.state = REDACTED;
+        this.postalCode = REDACTED;
+        this.country = REDACTED;
         this.deleted = true;
         this.defaultAddress = false;
     }

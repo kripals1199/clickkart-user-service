@@ -6,9 +6,14 @@ import com.clickkart.user.constant.LoggerNames;
 import com.clickkart.user.dto.request.UpdatePreferencesRequest;
 import com.clickkart.user.dto.request.UpdateProfileRequest;
 import com.clickkart.user.dto.response.UserProfileResponse;
+import com.clickkart.user.entity.AddressEntity;
 import com.clickkart.user.entity.UserProfileEntity;
 import com.clickkart.user.enums.UserAuditAction;
+import com.clickkart.user.exception.ErasureBlockedException;
+import com.clickkart.user.exception.ProfileErasedException;
 import com.clickkart.user.exception.ProfileNotFoundException;
+import com.clickkart.user.repository.AddressRepository;
+import com.clickkart.user.repository.SellerProfileRepository;
 import com.clickkart.user.repository.UserProfileRepository;
 import com.clickkart.user.repository.UserProfileSpecifications;
 import com.clickkart.user.service.AuditTrailService;
@@ -34,6 +39,8 @@ public class UserProfileServiceImpl implements UserProfileService {
 
     private final UserProfileRepository userProfileRepository;
     private final UserProfileCreator userProfileCreator;
+    private final AddressRepository addressRepository;
+    private final SellerProfileRepository sellerProfileRepository;
     private final AuditTrailService auditTrailService;
     private final UserProperties userProperties;
 
@@ -93,6 +100,77 @@ public class UserProfileServiceImpl implements UserProfileService {
 
     @Override
     @Transactional
+    public UserProfileEntity getWritableProfile(
+            String userPublicId, String correlationId, RequestMetadata requestMetadata) {
+        UserProfileEntity profile = getOrCreateProfile(userPublicId, correlationId, requestMetadata);
+        if (profile.isErased()) {
+            log.warn("WRITE_REFUSED_PROFILE_ERASED userPublicId={} correlationId={}", userPublicId, correlationId);
+            throw new ProfileErasedException(userPublicId);
+        }
+        return profile;
+    }
+
+    @Override
+    @Transactional
+    public void eraseOwnProfile(String userPublicId, String correlationId, RequestMetadata requestMetadata) {
+        // A seller's GSTIN and trading history are subject to statutory retention, and erasing the
+        // business identity would orphan whatever they have listed. Neither outcome is one a
+        // self-service endpoint should pick silently.
+        if (sellerProfileRepository.findByProfileUserPublicId(userPublicId).isPresent()) {
+            throw new ErasureBlockedException(
+                    "This account has a seller profile. Business records are subject to statutory "
+                            + "retention, so erasure must be handled by support.");
+        }
+        erase(userPublicId, userPublicId, correlationId, requestMetadata);
+    }
+
+    @Override
+    @Transactional
+    public void eraseProfile(
+            String userPublicId, String actorPublicId, String correlationId, RequestMetadata requestMetadata) {
+        erase(userPublicId, actorPublicId, correlationId, requestMetadata);
+    }
+
+    private void erase(
+            String userPublicId, String actorPublicId, String correlationId, RequestMetadata requestMetadata) {
+        UserProfileEntity profile = userProfileRepository
+                .findByUserPublicId(userPublicId)
+                .orElseThrow(() -> new ProfileNotFoundException(userPublicId));
+
+        // Idempotent: a retried or duplicated erasure request is not an error, and re-running it
+        // would otherwise emit a second PROFILE_ERASED entry for one erasure.
+        if (profile.isErased()) {
+            log.info("ERASURE_ALREADY_DONE userPublicId={} correlationId={}", userPublicId, correlationId);
+            return;
+        }
+
+        List<AddressEntity> addresses =
+                addressRepository.findByProfileUserPublicIdAndDeletedFalseOrderByDefaultAddressDescIdAsc(userPublicId);
+        addresses.forEach(AddressEntity::scrubForErasure);
+        addressRepository.saveAllAndFlush(addresses);
+
+        // Any seller row is scrubbed too - reached only via the ADMIN path, since the self-service
+        // path refuses above.
+        sellerProfileRepository.findByProfileUserPublicId(userPublicId).ifPresent(seller -> {
+            seller.eraseBusinessIdentity();
+            sellerProfileRepository.saveAndFlush(seller);
+        });
+
+        profile.erase();
+        userProfileRepository.saveAndFlush(profile);
+
+        // Counts, never content - the point of an erasure record is that it proves the erasure
+        // happened, not that it preserves what was erased.
+        auditTrailService.record(
+                correlationId, actorPublicId, UserAuditAction.PROFILE_ERASED, requestMetadata,
+                "subject=" + userPublicId + " addressesScrubbed=" + addresses.size()
+                        + " selfService=" + userPublicId.equals(actorPublicId));
+        log.warn("PROFILE_ERASED userPublicId={} actor={} addressesScrubbed={} correlationId={}",
+                userPublicId, actorPublicId, addresses.size(), correlationId);
+    }
+
+    @Override
+    @Transactional
     public UserProfileResponse getOwnProfile(
             String userPublicId, String correlationId, RequestMetadata requestMetadata) {
         return UserProfileResponse.from(getOrCreateProfile(userPublicId, correlationId, requestMetadata));
@@ -105,7 +183,7 @@ public class UserProfileServiceImpl implements UserProfileService {
             UpdateProfileRequest request,
             String correlationId,
             RequestMetadata requestMetadata) {
-        UserProfileEntity profile = getOrCreateProfile(userPublicId, correlationId, requestMetadata);
+        UserProfileEntity profile = getWritableProfile(userPublicId, correlationId, requestMetadata);
         profile.updateProfile(
                 trimToNull(request.firstName()),
                 trimToNull(request.lastName()),
@@ -127,7 +205,7 @@ public class UserProfileServiceImpl implements UserProfileService {
             UpdatePreferencesRequest request,
             String correlationId,
             RequestMetadata requestMetadata) {
-        UserProfileEntity profile = getOrCreateProfile(userPublicId, correlationId, requestMetadata);
+        UserProfileEntity profile = getWritableProfile(userPublicId, correlationId, requestMetadata);
         profile.updatePreferences(
                 request.marketingEmailOptIn(),
                 request.marketingSmsOptIn(),

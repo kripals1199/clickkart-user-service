@@ -70,12 +70,14 @@ not public catalog content. Reachable through the Gateway at the same paths.
 | `PUT` | `/api/v1/users/me/addresses/{addressId}` | Replace a saved address |
 | `DELETE` | `/api/v1/users/me/addresses/{addressId}` | Remove a saved address (soft delete) |
 | `PUT` | `/api/v1/users/me/addresses/{addressId}/default` | Make this the default delivery address |
+| `DELETE` | `/api/v1/users/me` | Erase own personal data (irreversible) |
 | `GET` | `/api/v1/users/me/seller` | Fetch own seller business profile |
 | `PUT` | `/api/v1/users/me/seller` | Create/update own seller profile (**ROLE_SELLER**) |
 | `GET` | `/api/v1/users` | **ADMIN** — browse profiles, optional `?search=` |
 | `GET` | `/api/v1/users/{userPublicId}` | **ADMIN** — fetch one customer's profile |
 | `GET` | `/api/v1/users/sellers` | **ADMIN** — seller work queue, optional `?status=` |
 | `PUT` | `/api/v1/users/{userPublicId}/seller/verification` | **ADMIN** — approve or reject a seller |
+| `DELETE` | `/api/v1/users/{userPublicId}` | **ADMIN** — erase a customer's data on their behalf |
 
 The admin endpoints are read-only by design. An operator may need to look a customer up for a
 support case, but editing someone else's profile on their behalf is not a flow this platform has —
@@ -153,6 +155,29 @@ at. Changing contact details or pickup address does not, since that is not what 
 A rejection **requires a note**, so the seller is told what to fix rather than hitting a dead end.
 The decision is audited against the ADMIN who made it, not the seller — the trail has to answer
 "who approved this business".
+
+**Erasure scrubs, it does not delete rows.** `DELETE /me` clears every personal field, withdraws
+marketing consent, and overwrites each saved address rather than merely flagging it — a soft delete
+alone would leave the full address recoverable in the table. The rows themselves survive, because
+`userPublicId` is referenced by the append-only audit chain: deleting them would leave audit entries
+pointing at nothing, and rewriting the chain to match is exactly what the chain exists to prevent.
+
+This is also why Order Service must **snapshot** an address at checkout rather than hold a foreign
+key to it. An order's record of where it shipped is subject to statutory retention and must survive
+a later erasure request; this row must not. Two obligations on the same data, which only separate
+copies can satisfy.
+
+Erasure is irreversible: reads still succeed and report `erasedAt`, but every write returns 409.
+That guard matters more than it looks — the self-service endpoints auto-provision on first access,
+so without it the very next request would quietly repopulate a profile someone asked to empty.
+Repeating the request is idempotent rather than an error.
+
+**A seller account cannot erase itself.** A GSTIN and its trading history carry statutory retention
+under Indian GST rules, and erasing the business identity would orphan whatever the seller has
+listed. Self-service returns 409 explaining why; the ADMIN endpoint proceeds, on the basis that an
+operator has already handled the judgement a self-service endpoint cannot make. The scrubbed GSTIN
+is per-row (`ERASED-<id>`) because the column is unique — a fixed marker would collide with the next
+erased seller and fail the erasure at exactly the wrong moment.
 
 **A seller's pickup address must be one of their own.** They control that field, so an unchecked id
 would let them read back another customer's address through their own seller profile. Deleting the

@@ -24,7 +24,12 @@ public record UserProfileResponse(
         String preferredLanguage,
         String preferredCurrency,
         Instant createdDate,
-        Instant updatedDate) {
+        Instant updatedDate,
+        /**
+         * When personal data was erased, or null while the account is live. Present so a client can
+         * tell "erased" from "never filled in" - both otherwise look like a profile of nulls.
+         */
+        Instant erasedAt) {
 
     public static UserProfileResponse from(UserProfileEntity entity) {
         return new UserProfileResponse(
@@ -40,6 +45,7 @@ public record UserProfileResponse(
                 entity.getPreferredLanguage(),
                 entity.getPreferredCurrency(),
                 entity.getCreatedDate(),
-                entity.getUpdatedDate());
+                entity.getUpdatedDate(),
+                entity.getErasedAt());
     }
 }
