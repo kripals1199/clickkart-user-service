@@ -7,11 +7,13 @@ import com.clickkart.user.jwt.JwtService;
 import com.clickkart.user.security.AuthenticatedPrincipal;
 import com.clickkart.user.security.RestAccessDeniedHandler;
 import com.clickkart.user.security.RestAuthenticationEntryPoint;
+import com.clickkart.user.security.InternalApiKeyFilter;
 import com.clickkart.user.security.RevocationService;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -49,6 +51,7 @@ public class SecurityConfig {
     /** Only used if a write ever occurs outside a request context; every real path here is authenticated. */
     private static final String SYSTEM_ACTOR = "system";
 
+    /** Genuinely unauthenticated. Contains no business route - profile and address data is personal. */
     private static final List<String> PUBLIC_PATHS = List.of(
             ApiPaths.ACTUATOR_HEALTH,
             ApiPaths.ACTUATOR_HEALTH_WILDCARD,
@@ -56,6 +59,19 @@ public class SecurityConfig {
             ApiPaths.SWAGGER_UI,
             ApiPaths.SWAGGER_UI_WILDCARD,
             ApiPaths.API_DOCS_WILDCARD);
+
+    /** Authenticated by shared secret instead of a JWT - see {@link InternalApiKeyFilter}. */
+    private static final List<String> INTERNAL_PATHS = List.of(ApiPaths.INTERNAL_WILDCARD);
+
+    /**
+     * Paths {@link JwtAuthenticationFilter} must not try to authenticate. This is deliberately a
+     * different list from {@link #PUBLIC_PATHS}: "the JWT filter skips this" and "anyone may call
+     * this" are separate questions, and conflating them is how an internal endpoint accidentally
+     * becomes an anonymous one. The internal paths skip the JWT filter because they carry no
+     * bearer token, and are then authorized against ROLE_INTERNAL below.
+     */
+    private static final List<String> JWT_EXEMPT_PATHS =
+            Stream.concat(PUBLIC_PATHS.stream(), INTERNAL_PATHS.stream()).toList();
 
     /** {@code HstsHeaderWriter.DEFAULT_MAX_AGE_SECONDS} is private - this is the same 365-day value, just accessible. */
     private static final long HSTS_MAX_AGE_SECONDS = Duration.ofDays(365).toSeconds();
@@ -68,7 +84,14 @@ public class SecurityConfig {
             JwtService jwtService,
             RevocationService revocationService,
             HandlerExceptionResolver handlerExceptionResolver) {
-        return new JwtAuthenticationFilter(jwtService, revocationService, handlerExceptionResolver, PUBLIC_PATHS);
+        return new JwtAuthenticationFilter(jwtService, revocationService, handlerExceptionResolver, JWT_EXEMPT_PATHS);
+    }
+
+    @Bean
+    public InternalApiKeyFilter internalApiKeyFilter(
+            UserProperties userProperties, HandlerExceptionResolver handlerExceptionResolver) {
+        return new InternalApiKeyFilter(
+                userProperties.getInternalApiKey(), handlerExceptionResolver, INTERNAL_PATHS);
     }
 
     /** Defense in depth - this service is independently reachable, bypassing the Gateway's own CORS config. */
@@ -90,6 +113,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(
             HttpSecurity http,
             JwtAuthenticationFilter jwtAuthenticationFilter,
+            InternalApiKeyFilter internalApiKeyFilter,
             CorsConfigurationSource corsConfigurationSource,
             RestAuthenticationEntryPoint restAuthenticationEntryPoint,
             RestAccessDeniedHandler restAccessDeniedHandler)
@@ -100,9 +124,15 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(PUBLIC_PATHS.toArray(new String[0]))
                         .permitAll()
+                        // Belt and braces: InternalApiKeyFilter already rejects a bad key, but this
+                        // means a future filter-ordering mistake fails closed rather than leaving
+                        // the internal surface anonymous.
+                        .requestMatchers(INTERNAL_PATHS.toArray(new String[0]))
+                        .hasRole("INTERNAL")
                         .anyRequest()
                         .authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(internalApiKeyFilter, JwtAuthenticationFilter.class)
                 // Safety net only - see RestAuthenticationEntryPoint/RestAccessDeniedHandler Javadoc.
                 .exceptionHandling(handler -> handler
                         .authenticationEntryPoint(restAuthenticationEntryPoint)

@@ -21,4 +21,6 @@ public record UpdatePreferencesRequest(
                 String preferredLanguage,
         @NotBlank(message = "must not be blank")
                 @Pattern(regexp = "^[A-Z]{3}$", message = "must be a 3-letter ISO 4217 currency code")
-                String preferredCurrency) {}
+                String preferredCurrency
+                
+		) {}

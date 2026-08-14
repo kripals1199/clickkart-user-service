@@ -17,6 +17,9 @@ public interface AddressService {
 
     AddressResponse getOwnAddress(String userPublicId, Long addressId);
 
+    /** The address checkout pre-fills. 404 when the customer has saved none. */
+    AddressResponse getDefaultAddress(String userPublicId);
+
     AddressResponse addOwnAddress(
             String userPublicId, AddressRequest request, String correlationId, RequestMetadata requestMetadata);
 

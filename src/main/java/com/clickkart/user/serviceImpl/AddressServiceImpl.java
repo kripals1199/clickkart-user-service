@@ -11,6 +11,7 @@ import com.clickkart.user.enums.UserAuditAction;
 import com.clickkart.user.exception.AddressLimitExceededException;
 import com.clickkart.user.exception.AddressNotFoundException;
 import com.clickkart.user.repository.AddressRepository;
+import com.clickkart.user.repository.SellerProfileRepository;
 import com.clickkart.user.service.AddressService;
 import com.clickkart.user.service.AuditTrailService;
 import com.clickkart.user.service.UserProfileService;
@@ -41,6 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AddressServiceImpl implements AddressService {
 
     private final AddressRepository addressRepository;
+    private final SellerProfileRepository sellerProfileRepository;
     private final UserProfileService userProfileService;
     private final AuditTrailService auditTrailService;
     private final UserProperties userProperties;
@@ -59,6 +61,17 @@ public class AddressServiceImpl implements AddressService {
     @Transactional(readOnly = true)
     public AddressResponse getOwnAddress(String userPublicId, Long addressId) {
         return AddressResponse.from(requireOwnedAddress(userPublicId, addressId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public AddressResponse getDefaultAddress(String userPublicId) {
+        return addressRepository
+                .findByProfileUserPublicIdAndDefaultAddressTrueAndDeletedFalse(userPublicId)
+                .map(AddressResponse::from)
+                // Same 404 shape whether the caller asked for a specific address or "whichever is
+                // default", but with a message that actually describes this case.
+                .orElseThrow(AddressNotFoundException::noDefaultAddress);
     }
 
     @Override
@@ -125,6 +138,16 @@ public class AddressServiceImpl implements AddressService {
         boolean wasDefault = address.isDefaultAddress();
         address.markDeleted();
         addressRepository.saveAndFlush(address);
+
+        // A seller may have nominated this address for pickup. Leaving the reference behind would
+        // point couriers at a row the customer believes they deleted, and nothing else in the
+        // system would notice - the id still resolves, it is just flagged deleted.
+        sellerProfileRepository.findByPickupAddressId(addressId).forEach(seller -> {
+            log.warn("SELLER_PICKUP_ADDRESS_CLEARED addressId={} userPublicId={} - referenced address was deleted",
+                    addressId, userPublicId);
+            seller.clearPickupAddress();
+            sellerProfileRepository.saveAndFlush(seller);
+        });
 
         if (wasDefault) {
             promoteOldestSurvivorToDefault(userPublicId);

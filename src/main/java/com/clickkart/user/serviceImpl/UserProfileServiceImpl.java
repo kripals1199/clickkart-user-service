@@ -15,6 +15,7 @@ import com.clickkart.user.service.AuditTrailService;
 import com.clickkart.user.service.UserProfileService;
 import com.clickkart.user.web.RequestMetadata;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -153,6 +154,14 @@ public class UserProfileServiceImpl implements UserProfileService {
                 .findByUserPublicId(userPublicId)
                 .map(UserProfileResponse::from)
                 .orElseThrow(() -> new ProfileNotFoundException(userPublicId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<UserProfileResponse> findProfilesByPublicIds(List<String> userPublicIds) {
+        return userProfileRepository.findByUserPublicIdIn(userPublicIds).stream()
+                .map(UserProfileResponse::from)
+                .toList();
     }
 
     @Override

@@ -31,6 +31,9 @@ public interface AddressRepository extends JpaRepository<AddressEntity, Long> {
 
     long countByProfileUserPublicIdAndDeletedFalse(String userPublicId);
 
+    /** Checkout pre-fill via the internal API, without pulling the customer's whole address book. */
+    Optional<AddressEntity> findByProfileUserPublicIdAndDefaultAddressTrueAndDeletedFalse(String userPublicId);
+
     /**
      * Demotes every other address of this profile in one statement.
      *

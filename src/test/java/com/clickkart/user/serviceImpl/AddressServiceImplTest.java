@@ -42,6 +42,7 @@ class AddressServiceImplTest {
     private static final RequestMetadata METADATA = new RequestMetadata("203.0.113.7", "junit");
 
     @Mock private AddressRepository addressRepository;
+    @Mock private com.clickkart.user.repository.SellerProfileRepository sellerProfileRepository;
     @Mock private UserProfileService userProfileService;
     @Mock private AuditTrailService auditTrailService;
 
@@ -53,10 +54,13 @@ class AddressServiceImplTest {
     void setUp() {
         userProperties = new UserProperties();
         userProperties.setMaxAddressesPerUser(3);
-        service = new AddressServiceImpl(addressRepository, userProfileService, auditTrailService, userProperties);
+        service = new AddressServiceImpl(
+                addressRepository, sellerProfileRepository, userProfileService, auditTrailService, userProperties);
 
         profile = UserProfileEntity.createFor(OWNER, "en", "INR");
         when(userProfileService.getOrCreateProfile(eq(OWNER), any(), any())).thenReturn(profile);
+        when(sellerProfileRepository.findByPickupAddressId(org.mockito.ArgumentMatchers.anyLong()))
+                .thenReturn(java.util.List.of());
         when(addressRepository.saveAndFlush(any(AddressEntity.class)))
                 .thenAnswer(invocation -> {
                     AddressEntity entity = invocation.getArgument(0);

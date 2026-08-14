@@ -15,5 +15,11 @@ public enum UserAuditAction {
     ADDRESS_ADDED,
     ADDRESS_UPDATED,
     ADDRESS_DELETED,
-    DEFAULT_ADDRESS_CHANGED
+    DEFAULT_ADDRESS_CHANGED,
+    SELLER_PROFILE_CREATED,
+    SELLER_PROFILE_UPDATED,
+    /** Seller changed their business identity, so a previously granted verification was withdrawn. */
+    SELLER_VERIFICATION_RESET,
+    /** An operator approved or rejected a seller. Recorded against the ADMIN, not the seller. */
+    SELLER_VERIFICATION_DECIDED
 }

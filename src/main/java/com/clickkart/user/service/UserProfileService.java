@@ -6,6 +6,7 @@ import com.clickkart.user.dto.request.UpdateProfileRequest;
 import com.clickkart.user.dto.response.UserProfileResponse;
 import com.clickkart.user.entity.UserProfileEntity;
 import com.clickkart.user.web.RequestMetadata;
+import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -37,4 +38,11 @@ public interface UserProfileService {
 
     /** Admin-only browse. {@code search} matches display/first/last name, case-insensitively; null returns everything. */
     Page<UserProfileResponse> browseProfiles(String search, Pageable pageable);
+
+    /**
+     * Bulk resolution for the internal API. Ids with no profile are simply absent from the result
+     * rather than failing the batch - a caller resolving 50 order customers should not lose all 50
+     * because one never opened their profile.
+     */
+    List<UserProfileResponse> findProfilesByPublicIds(List<String> userPublicIds);
 }

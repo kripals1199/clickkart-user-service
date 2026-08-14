@@ -23,9 +23,28 @@ public final class ApiPaths {
     public static final String ME_ADDRESS_BY_ID = ME_ADDRESSES + "/{addressId}";
     public static final String ME_ADDRESS_DEFAULT = ME_ADDRESS_BY_ID + "/default";
 
+    /** Seller's own business profile. Writes additionally require ROLE_SELLER. */
+    public static final String ME_SELLER = ME + "/seller";
+
     /** Admin-only. {@code userPublicId} is Auth Service's {@code publicId}, i.e. the JWT subject. */
     public static final String ADMIN_USERS = BASE;
     public static final String ADMIN_USER_BY_PUBLIC_ID = BASE + "/{userPublicId}";
+    public static final String ADMIN_SELLERS = BASE + "/sellers";
+    public static final String ADMIN_SELLER_VERIFICATION = BASE + "/{userPublicId}/seller/verification";
+
+    /**
+     * Service-to-service surface. Authenticated by a shared secret rather than a customer JWT
+     * (see {@code InternalApiKeyFilter}) and deliberately given no route in the Gateway, so it is
+     * reachable only from inside the cluster network. Kept under a separate root rather than mixed
+     * into {@link #BASE} so "which endpoints are not customer-facing" is answerable by path alone.
+     */
+    public static final String INTERNAL_BASE = "/internal/v1/users";
+    public static final String INTERNAL_WILDCARD = "/internal/**";
+    public static final String INTERNAL_PROFILE = INTERNAL_BASE + "/{userPublicId}";
+    public static final String INTERNAL_PROFILES_LOOKUP = INTERNAL_BASE + "/lookup";
+    public static final String INTERNAL_ADDRESS = INTERNAL_BASE + "/{userPublicId}/addresses/{addressId}";
+    public static final String INTERNAL_DEFAULT_ADDRESS = INTERNAL_BASE + "/{userPublicId}/addresses/default";
+    public static final String INTERNAL_SELLER = INTERNAL_BASE + "/{userPublicId}/seller";
 
     public static final String ACTUATOR_HEALTH = "/actuator/health";
     public static final String ACTUATOR_HEALTH_WILDCARD = "/actuator/health/**";

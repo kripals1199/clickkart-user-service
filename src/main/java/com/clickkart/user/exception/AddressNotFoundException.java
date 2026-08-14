@@ -13,4 +13,17 @@ public class AddressNotFoundException extends RuntimeException {
     public AddressNotFoundException(Long addressId) {
         super("Address " + addressId + " was not found");
     }
+
+    private AddressNotFoundException(String message) {
+        super(message);
+    }
+
+    /**
+     * The customer has saved no addresses, so there is no default to return. Distinct message from
+     * the id-based case because "Address null was not found" would be a worse answer than the
+     * question deserves.
+     */
+    public static AddressNotFoundException noDefaultAddress() {
+        return new AddressNotFoundException("No default address is set for this user");
+    }
 }

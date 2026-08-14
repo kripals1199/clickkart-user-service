@@ -19,6 +19,17 @@ public class UserProperties {
     /** Shared HMAC secret. Must be the same value Auth Service signs with and the Gateway validates against. */
     private String jwtSecret;
 
+    /**
+     * Shared secret guarding {@code /internal/**}, presented by calling services as
+     * {@code X-Internal-Api-Key}. Separate from {@link #jwtSecret} on purpose: that one is a
+     * signature key held by three services, while this authenticates callers. Reusing one secret
+     * for both would mean anything able to validate a token could also call the internal API.
+     *
+     * <p>Blank means no caller can authenticate - {@code InternalApiKeyFilter} refuses every
+     * internal request rather than treating an unset key as a match.
+     */
+    private String internalApiKey;
+
     /** Must match Auth Service's {@code auth.revocation-key-prefix}, or logout would not be seen here. */
     private String revocationKeyPrefix = "revoked:jti:";
 

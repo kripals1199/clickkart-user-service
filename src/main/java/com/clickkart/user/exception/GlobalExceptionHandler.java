@@ -67,6 +67,25 @@ public class GlobalExceptionHandler {
         return respond(HttpStatus.NOT_FOUND, ErrorCode.PROFILE_NOT_FOUND, ex.getMessage(), request);
     }
 
+    @ExceptionHandler(SellerProfileNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleSellerProfileNotFound(
+            SellerProfileNotFoundException ex, HttpServletRequest request) {
+        return respond(HttpStatus.NOT_FOUND, ErrorCode.SELLER_PROFILE_NOT_FOUND, ex.getMessage(), request);
+    }
+
+    @ExceptionHandler(DuplicateGstinException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDuplicateGstin(
+            DuplicateGstinException ex, HttpServletRequest request) {
+        return respond(HttpStatus.CONFLICT, ErrorCode.DUPLICATE_GSTIN, ex.getMessage(), request);
+    }
+
+    /** Conditional request rules the annotations can't express, e.g. a rejection with no reason. */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(
+            IllegalArgumentException ex, HttpServletRequest request) {
+        return respond(HttpStatus.BAD_REQUEST, ErrorCode.VALIDATION_FAILED, ex.getMessage(), request);
+    }
+
     @ExceptionHandler(AddressLimitExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleAddressLimit(
             AddressLimitExceededException ex, HttpServletRequest request) {
@@ -150,6 +169,8 @@ public class GlobalExceptionHandler {
         static final String MISSING_CORRELATION_ID = "MISSING_CORRELATION_ID";
         static final String ADDRESS_NOT_FOUND = "ADDRESS_NOT_FOUND";
         static final String PROFILE_NOT_FOUND = "PROFILE_NOT_FOUND";
+        static final String SELLER_PROFILE_NOT_FOUND = "SELLER_PROFILE_NOT_FOUND";
+        static final String DUPLICATE_GSTIN = "DUPLICATE_GSTIN";
         static final String ADDRESS_LIMIT_EXCEEDED = "ADDRESS_LIMIT_EXCEEDED";
         static final String CONCURRENT_MODIFICATION = "CONCURRENT_MODIFICATION";
         static final String SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE";

@@ -70,14 +70,46 @@ not public catalog content. Reachable through the Gateway at the same paths.
 | `PUT` | `/api/v1/users/me/addresses/{addressId}` | Replace a saved address |
 | `DELETE` | `/api/v1/users/me/addresses/{addressId}` | Remove a saved address (soft delete) |
 | `PUT` | `/api/v1/users/me/addresses/{addressId}/default` | Make this the default delivery address |
+| `GET` | `/api/v1/users/me/seller` | Fetch own seller business profile |
+| `PUT` | `/api/v1/users/me/seller` | Create/update own seller profile (**ROLE_SELLER**) |
 | `GET` | `/api/v1/users` | **ADMIN** — browse profiles, optional `?search=` |
 | `GET` | `/api/v1/users/{userPublicId}` | **ADMIN** — fetch one customer's profile |
+| `GET` | `/api/v1/users/sellers` | **ADMIN** — seller work queue, optional `?status=` |
+| `PUT` | `/api/v1/users/{userPublicId}/seller/verification` | **ADMIN** — approve or reject a seller |
 
 The admin endpoints are read-only by design. An operator may need to look a customer up for a
 support case, but editing someone else's profile on their behalf is not a flow this platform has —
 and the change would not be attributable to the customer who supposedly made it.
 
 Swagger UI: `/swagger-ui.html`, and in the Gateway's aggregated dropdown as *User Service*.
+
+### Internal API (service-to-service)
+
+`/internal/v1/users/**` exists because Order Service must snapshot a shipping address at checkout,
+where there is no customer JWT to act on — a retry, a queued step or a reconciliation job has no
+token at all.
+
+| Method | Path | Caller |
+|---|---|---|
+| `GET` | `/internal/v1/users/{userPublicId}` | resolve one profile |
+| `POST` | `/internal/v1/users/lookup` | resolve up to 200 profiles in one call |
+| `GET` | `/internal/v1/users/{userPublicId}/addresses/{addressId}` | Order — snapshot a shipping address |
+| `GET` | `/internal/v1/users/{userPublicId}/addresses/default` | Cart/checkout — pre-fill |
+| `GET` | `/internal/v1/users/{userPublicId}/seller` | Product — attribute a listing, gate on verification |
+
+Authenticated by `X-Internal-Api-Key` (constant-time compared) plus the usual `X-Correlation-Id`.
+**Not** by network position: these endpoints have no Gateway route and the k8s Service is ClusterIP,
+but that is routing, not authorization — the same argument this service makes for ignoring
+`X-User-Id`. Anything already inside the cluster can reach the port, so the secret is the gate.
+
+The key is deliberately **not** `JWT_SECRET`: that one signs tokens and is held by three services,
+whereas this authenticates callers. Sharing one value would mean anything able to validate a token
+could also read any user's address.
+
+Every operation is a **read**, so a leaked key is a disclosure problem rather than a tampering one.
+Address lookups are still scoped by owner — passing a mismatched `(user, address)` pair returns 404,
+so the ownership rule lives here rather than in each calling service. The whole surface is excluded
+from the published OpenAPI spec.
 
 ---
 
@@ -111,6 +143,21 @@ auditing consent.
 **The Audit Log Service is a required dependency.** If it is unreachable, the write fails and rolls
 back rather than persisting a change with no audit entry. An unaudited write is a permanent,
 undetectable gap in a tamper-evident chain; a failed request is visible and retryable.
+
+**Sellers cannot verify themselves.** `verificationStatus` is absent from the request DTO entirely,
+so only the ADMIN endpoint can move a seller out of `PENDING`. Changing business name or GSTIN
+withdraws an existing verification — otherwise a seller could pass the check with one legitimate
+registration and quietly swap in another, carrying the verified badge onto a business nobody looked
+at. Changing contact details or pickup address does not, since that is not what was verified.
+
+A rejection **requires a note**, so the seller is told what to fix rather than hitting a dead end.
+The decision is audited against the ADMIN who made it, not the seller — the trail has to answer
+"who approved this business".
+
+**A seller's pickup address must be one of their own.** They control that field, so an unchecked id
+would let them read back another customer's address through their own seller profile. Deleting the
+referenced address clears the reference, rather than leaving couriers pointed at a row the customer
+believes they deleted.
 
 ---
 
