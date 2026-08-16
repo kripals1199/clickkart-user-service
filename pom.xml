@@ -34,6 +34,28 @@
     </properties>
 
     <dependencies>
+        <!-- Schema as a reviewed artefact in git, rather than whatever ddl-auto inferred from the
+             entity classes at startup. Paired with spring.jpa.hibernate.ddl-auto=validate, which
+             turns a drift between entity and table into a failure to start rather than a silent
+             ALTER nobody reviewed - the behaviour that made ddl-auto=update unsafe in prod. -->
+        <!-- Spring Boot 4 split autoconfiguration out of spring-boot-autoconfigure into per-technology
+             modules. flyway-core alone gives you the library with no FlywayAutoConfiguration behind
+             it, so Flyway is on the classpath, the spring.flyway.* properties bind to nothing, and
+             the application starts silently without ever running a migration - which is exactly what
+             happened here before this module was added. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

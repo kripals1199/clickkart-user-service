@@ -32,6 +32,10 @@ public final class ApiPaths {
     public static final String ADMIN_SELLERS = BASE + "/sellers";
     public static final String ADMIN_SELLER_VERIFICATION = BASE + "/{userPublicId}/seller/verification";
 
+    /** This service's own tamper-evident activity log. ADMIN only - it names every actor who touched a profile. */
+    public static final String ADMIN_AUDIT = BASE + "/audit";
+    public static final String ADMIN_AUDIT_VERIFY = ADMIN_AUDIT + "/verification";
+
     /**
      * Service-to-service surface. Authenticated by a shared secret rather than a customer JWT
      * (see {@code InternalApiKeyFilter}) and deliberately given no route in the Gateway, so it is
