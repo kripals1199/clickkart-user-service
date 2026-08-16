@@ -2,30 +2,45 @@
 package com.clickkart.user.serviceImpl;
 
 import com.clickkart.user.constant.LoggerNames;
+import com.clickkart.user.entity.AuditChainHeadEntity;
+import com.clickkart.user.entity.AuditLogEntryEntity;
+import com.clickkart.user.enums.AuditOutcome;
 import com.clickkart.user.enums.UserAuditAction;
 import com.clickkart.user.feign.AuditEventRequest;
 import com.clickkart.user.feign.AuditLogServiceClient;
+import com.clickkart.user.repository.AuditChainHeadRepository;
+import com.clickkart.user.repository.AuditLogEntryRepository;
 import com.clickkart.user.service.AuditTrailService;
+import com.clickkart.user.service.ChainIntegrityReport;
 import com.clickkart.user.web.RequestMetadata;
+import java.time.Instant;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Thin dispatcher to the Audit Log Service. There is no local audit table here - the whole point of
- * the central hash-chained trail is that it is one tamper-evident sequence, not per-service copies
- * that can disagree.
+ * Writes the local hash-chained entry first, then dispatches to the central Audit Log Service.
  *
- * <p>{@code details} must never carry personal data. The audit trail is queryable by operators and
- * is retained far longer than the profile row itself, so recording the <em>shape</em> of a change
- * (which fields, how many addresses) rather than its content keeps a customer's home address out of
- * a second, longer-lived store. Callers below follow that rule.
+ * <p><strong>Local first, and the order is the design.</strong> The local write is the one that must
+ * not be lost, so it happens while the chain-head lock is held and inside a transaction. The central
+ * dispatch is best-effort afterwards: if it throws, the local entry still stands and the exception is
+ * logged rather than propagated, because failing a customer's request over a reporting call would
+ * turn an aggregation problem into an outage.
+ *
+ * <p>That is a deliberate reversal of what this class did before, when the central call was the only
+ * write and its failure took the request with it.
  */
 @Slf4j(topic = LoggerNames.AUDIT)
 @Service
 @RequiredArgsConstructor
 public class AuditTrailServiceImpl implements AuditTrailService {
 
+    private final AuditLogEntryRepository auditLogEntryRepository;
+    private final AuditChainHeadRepository auditChainHeadRepository;
     private final AuditLogServiceClient auditLogServiceClient;
 
     @Override
@@ -35,9 +50,91 @@ public class AuditTrailServiceImpl implements AuditTrailService {
             UserAuditAction action,
             RequestMetadata requestMetadata,
             String details) {
-        AuditEventRequest request =
-                AuditEventRequest.of(correlationId, actor, action, requestMetadata.ipAddress(), details);
-        auditLogServiceClient.logEvent(correlationId, request);
-        log.info("AUDIT_DISPATCHED correlationId={} actor={} action={} details={}", correlationId, actor, action, details);
+        record(correlationId, actor, action, AuditOutcome.SUCCESS, requestMetadata, details);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void record(
+            String correlationId,
+            String actor,
+            UserAuditAction action,
+            AuditOutcome outcome,
+            RequestMetadata requestMetadata,
+            String details) {
+
+        AuditChainHeadEntity head = auditChainHeadRepository
+                .lockForUpdate(AuditChainHeadEntity.SINGLETON_ID)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Audit chain head row missing - AuditChainSeeder should have created it at startup"));
+
+        AuditLogEntryEntity entry = AuditLogEntryEntity.create(
+                Instant.now(),
+                correlationId,
+                actor,
+                action,
+                outcome,
+                requestMetadata.ipAddress(),
+                requestMetadata.userAgent(),
+                details,
+                head.getLastEntryHash());
+        auditLogEntryRepository.save(entry);
+
+        head.advance(entry.getEntryHash());
+        auditChainHeadRepository.save(head);
+
+        dispatchCentrally(correlationId, actor, action, requestMetadata, details);
+    }
+
+    /**
+     * Best-effort. A failure here means the central trail is missing an event the local chain has,
+     * which is a reconciliation problem for someone reading both - not a reason to fail the customer
+     * whose request produced it.
+     */
+    private void dispatchCentrally(
+            String correlationId,
+            String actor,
+            UserAuditAction action,
+            RequestMetadata requestMetadata,
+            String details) {
+        try {
+            auditLogServiceClient.logEvent(
+                    correlationId,
+                    AuditEventRequest.of(correlationId, actor, action, requestMetadata.ipAddress(), details));
+        } catch (RuntimeException e) {
+            log.error("AUDIT_CENTRAL_DISPATCH_FAILED correlationId={} actor={} action={} cause={} - "
+                            + "the local chain has this event; the central trail does not",
+                    correlationId, actor, action, e.toString());
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true, rollbackFor = Exception.class)
+    public ChainIntegrityReport verifyChainIntegrity() {
+        List<AuditLogEntryEntity> entries = auditLogEntryRepository.findAllByOrderByIdAsc();
+
+        String expectedPreviousHash = GENESIS_HASH;
+        for (AuditLogEntryEntity entry : entries) {
+            if (!expectedPreviousHash.equals(entry.getPreviousEntryHash())) {
+                return ChainIntegrityReport.broken(
+                        entries.size(),
+                        entry.getId(),
+                        "previousEntryHash does not match the prior entry's hash - chain link broken");
+            }
+            if (!entry.recomputeHash().equals(entry.getEntryHash())) {
+                return ChainIntegrityReport.broken(
+                        entries.size(),
+                        entry.getId(),
+                        "recomputed hash does not match the stored entryHash - entry may have been tampered with");
+            }
+            expectedPreviousHash = entry.getEntryHash();
+        }
+        return ChainIntegrityReport.intact(entries.size());
+    }
+
+    @Override
+    @Transactional(readOnly = true, rollbackFor = Exception.class)
+    public Page<AuditLogEntryEntity> browse(Pageable pageable) {
+        return auditLogEntryRepository.findAllByOrderByIdAsc(pageable);
     }
 }
